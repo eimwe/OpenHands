@@ -476,6 +476,25 @@ const MOCK_LLM_PROFILES: {
   activeProfile: null,
 };
 
+/**
+ * Demo only (called from `browser.ts`, never from the shared test server): the
+ * UI blocks the composer until the active LLM profile has an API key, so seed
+ * one. The mock chat simulator ignores it — the real model/key come from
+ * `llm-bridge.ts` and the dev-server proxy.
+ */
+export function seedMockLlmProfileForDemo(): void {
+  MOCK_LLM_PROFILES.profiles.set("mistral", {
+    name: "mistral",
+    config: {
+      model: "mistral/mistral-small-latest",
+      base_url: "/mistral/v1",
+      api_key: "demo",
+    },
+    api_key_set: true,
+  });
+  MOCK_LLM_PROFILES.activeProfile = "mistral";
+}
+
 let mockOpenAISubscriptionConnected = false;
 
 const getProfileNameParam = (value: unknown): string =>

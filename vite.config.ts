@@ -118,6 +118,11 @@ export default defineConfig(({ mode }) => {
     VITE_RUNTIME_SERVICES_INFO,
   } = loadEnv(mode, process.cwd());
 
+  // Mock-mode demo only. No `VITE_` prefix on purpose: Vite inlines only
+  // `VITE_*` variables into the browser bundle, so this key stays on the dev
+  // server and is attached to proxied requests below (see "/mistral").
+  const { MISTRAL_API_KEY = "" } = loadEnv(mode, process.cwd(), "MISTRAL_");
+
   const isLibraryBuild = process.env.BUILD_LIB === "true";
   const USE_TLS = VITE_USE_TLS === "true";
   const INSECURE_SKIP_VERIFY = VITE_INSECURE_SKIP_VERIFY === "true";
@@ -405,6 +410,19 @@ export default defineConfig(({ mode }) => {
       host: VITE_BIND_HOST,
       allowedHosts: true,
       proxy: {
+        // Mock-mode LLM bridge: the browser calls /mistral/v1/chat/completions,
+        // the dev server forwards it to Mistral and adds the Authorization
+        // header from MISTRAL_API_KEY in .env. The key never reaches the
+        // browser, and there is no CORS issue.
+        "/mistral": {
+          target: "https://api.mistral.ai",
+          changeOrigin: true,
+          secure: true,
+          rewrite: (path: string) => path.replace(/^\/mistral/, ""),
+          ...(MISTRAL_API_KEY
+            ? { headers: { Authorization: `Bearer ${MISTRAL_API_KEY}` } }
+            : {}),
+        },
         "/api": {
           target: API_URL,
           changeOrigin: true,

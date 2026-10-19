@@ -29,7 +29,7 @@ const PAGINATION_EVENT_COUNT = 100;
 const PAGINATION_PAGE_DELAY_MS = 500;
 const PAGINATION_BASE_TIME = Date.UTC(2026, 4, 13, 0, 0, 0);
 
-type MockConversation = DirectConversationInfo & {
+export type MockConversation = DirectConversationInfo & {
   selected_repository?: string | null;
   selected_branch?: string | null;
   git_provider?: string | null;
@@ -119,6 +119,30 @@ const conversations: MockConversation[] = [
 const CONVERSATIONS = new Map<string, MockConversation>(
   conversations.map((conversation) => [conversation.id, conversation]),
 );
+
+/**
+ * Hooks for the in-browser chat simulator (`chat-sim-handlers.ts`): it owns the
+ * event logs of the conversations it creates, and registers/updates their list
+ * entries here so the sidebar, search and GET-by-id keep working unchanged.
+ */
+export function registerMockConversation(
+  conversation: MockConversation,
+): DirectConversationInfo {
+  CONVERSATIONS.set(conversation.id, conversation);
+  return createConversationResponse(conversation);
+}
+
+export function patchMockConversation(
+  id: string,
+  patch: Partial<MockConversation>,
+): void {
+  const current = CONVERSATIONS.get(id);
+  if (current) CONVERSATIONS.set(id, { ...current, ...patch });
+}
+
+export function getMockConversation(id: string): MockConversation | undefined {
+  return CONVERSATIONS.get(id);
+}
 
 const paginationEventsByConversation = new Map<string, OpenHandsEvent[]>([
   [
