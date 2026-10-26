@@ -14,6 +14,7 @@ import {
   AGENT_SERVER_UI_SCOPE_SELECTOR,
   transformAgentServerUISelector,
 } from "./src/styles/agent-server-ui-style-scope";
+import { DEFAULT_LLM_BASE_URL, LLM_PROXY_PATH } from "./src/mocks/llm-defaults";
 
 const LIB_ENTRY = fileURLToPath(new URL("./src/index.ts", import.meta.url));
 const LIB_EXTERNALS = [
@@ -115,13 +116,25 @@ export default defineConfig(({ mode }) => {
     // ingress/static-server, the Vite proxy cannot post-process the upstream
     // /server_info response, so the launcher serializes the info here and the
     // middleware below merges it into the proxied response.
-    VITE_RUNTIME_SERVICES_INFO,
   } = loadEnv(mode, process.cwd());
 
-  // Mock-mode demo only. No `VITE_` prefix on purpose: Vite inlines only
-  // `VITE_*` variables into the browser bundle, so this key stays on the dev
-  // server and is attached to proxied requests below (see "/mistral").
-  const { MISTRAL_API_KEY = "" } = loadEnv(mode, process.cwd(), "MISTRAL_");
+  // Mock-mode demo only. MISTRAL_API_KEY has no `VITE_` prefix on purpose:
+  // Vite inlines only `VITE_*` variables into the browser bundle, so the key
+  // stays on the dev server and is attached to proxied requests below (see
+  // LLM_PROXY_PATH). The non-secret VITE_LLM_BASE_URL / VITE_LLM_MODEL are
+  // also read by the browser (src/mocks/llm-bridge.ts).
+  const { MISTRAL_API_KEY = "", VITE_LLM_BASE_URL = "" } = loadEnv(
+    mode,
+    process.cwd(),
+    ["MISTRAL_", "VITE_LLM_"],
+  );
+  let llmBaseUrl: URL;
+  try {
+    llmBaseUrl = new URL(VITE_LLM_BASE_URL.trim() || DEFAULT_LLM_BASE_URL);
+  } catch {
+    llmBaseUrl = new URL(DEFAULT_LLM_BASE_URL);
+  }
+  const llmBasePath = llmBaseUrl.pathname.replace(/\/+$/, "");
 
   const isLibraryBuild = process.env.BUILD_LIB === "true";
   const USE_TLS = VITE_USE_TLS === "true";
@@ -410,15 +423,17 @@ export default defineConfig(({ mode }) => {
       host: VITE_BIND_HOST,
       allowedHosts: true,
       proxy: {
-        // Mock-mode LLM bridge: the browser calls /mistral/v1/chat/completions,
-        // the dev server forwards it to Mistral and adds the Authorization
+        // Mock-mode LLM bridge: the browser calls /llm-proxy/chat/completions,
+        // the dev server forwards it to the VITE_LLM_BASE_URL provider (full
+        // URL, e.g. https://api.mistral.ai/v1) and adds the Authorization
         // header from MISTRAL_API_KEY in .env. The key never reaches the
         // browser, and there is no CORS issue.
-        "/mistral": {
-          target: "https://api.mistral.ai",
+        [LLM_PROXY_PATH]: {
+          target: llmBaseUrl.origin,
           changeOrigin: true,
           secure: true,
-          rewrite: (path: string) => path.replace(/^\/mistral/, ""),
+          rewrite: (path: string) =>
+            `${llmBasePath}${path.slice(LLM_PROXY_PATH.length)}`,
           ...(MISTRAL_API_KEY
             ? { headers: { Authorization: `Bearer ${MISTRAL_API_KEY}` } }
             : {}),

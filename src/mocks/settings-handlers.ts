@@ -487,7 +487,7 @@ export function seedMockLlmProfileForDemo(): void {
     name: "mistral",
     config: {
       model: "mistral/mistral-small-latest",
-      base_url: "/mistral/v1",
+      base_url: "https://api.mistral.ai/v1",
       api_key: "demo",
     },
     api_key_set: true,

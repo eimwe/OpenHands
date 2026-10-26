@@ -1,14 +1,26 @@
 /**
  * Browser-side LLM client for the mock chat simulator. Talks to any
  * OpenAI-compatible `/chat/completions` endpoint (Mistral by default) and
- * streams the reply. Settings live in localStorage and are edited through the
- * small panel in `llm-config-panel.ts`.
+ * streams the reply.
  *
- * Demo only: the API key is stored in the browser and sent from the browser.
+ * Effective settings, highest priority first:
+ *   1. values saved from the ⚙ LLM panel (localStorage)
+ *   2. `.env`: VITE_LLM_BASE_URL, VITE_LLM_MODEL
+ *   3. built-in fallbacks in `llm-defaults.ts`
+ *
+ * The API key is never taken from a `VITE_` variable: by default it stays on
+ * the dev server (MISTRAL_API_KEY in `.env`) and is attached by the
+ * `/llm-proxy` route in vite.config.ts. A key typed into the panel is sent
+ * straight from the browser instead. Demo only.
  */
+import {
+  DEFAULT_LLM_BASE_URL,
+  DEFAULT_LLM_MODEL,
+  LLM_PROXY_PATH,
+} from "./llm-defaults";
 
 export interface LlmConfig {
-  /** Base URL up to (not including) `/chat/completions`. */
+  /** Full provider URL up to (not including) `/chat/completions`. */
   baseUrl: string;
   apiKey: string;
   model: string;
@@ -21,32 +33,85 @@ export interface LlmChatMessage {
 
 export const LLM_CONFIG_STORAGE_KEY = "oh-mock-llm";
 
+const fromEnv = (value: unknown): string =>
+  typeof value === "string" ? value.trim() : "";
+
+const normalizeUrl = (url: string): string => url.trim().replace(/\/+$/, "");
+
+/** Defaults the panel can override: the `.env` value, else the built-in one. */
 export const DEFAULT_LLM_CONFIG: LlmConfig = {
-  // Same-origin path handled by the Vite dev-server proxy (vite.config.ts),
-  // which adds the key from MISTRAL_API_KEY in .env. Set a full URL such as
-  // https://api.mistral.ai/v1 plus a key in the panel to call the API directly.
-  baseUrl: "/mistral/v1",
+  baseUrl: normalizeUrl(
+    fromEnv(import.meta.env.VITE_LLM_BASE_URL) || DEFAULT_LLM_BASE_URL,
+  ),
   apiKey: "",
-  model: "ministral-3b-2512",
+  model: fromEnv(import.meta.env.VITE_LLM_MODEL) || DEFAULT_LLM_MODEL,
 };
 
-export function readLlmConfig(): LlmConfig {
+/**
+ * What the panel has saved. An empty/missing field means "not overridden", so
+ * a later change to `.env` still takes effect for that field.
+ */
+function readOverrides(): Partial<LlmConfig> {
   try {
     const raw = window.localStorage.getItem(LLM_CONFIG_STORAGE_KEY);
-    if (!raw) return { ...DEFAULT_LLM_CONFIG };
-    const parsed = JSON.parse(raw) as Partial<LlmConfig>;
-    return {
-      baseUrl: parsed.baseUrl?.trim() || DEFAULT_LLM_CONFIG.baseUrl,
-      apiKey: parsed.apiKey?.trim() ?? "",
-      model: parsed.model?.trim() || DEFAULT_LLM_CONFIG.model,
-    };
+    return raw ? (JSON.parse(raw) as Partial<LlmConfig>) : {};
   } catch {
-    return { ...DEFAULT_LLM_CONFIG };
+    return {};
   }
 }
 
-export function writeLlmConfig(config: LlmConfig): void {
-  window.localStorage.setItem(LLM_CONFIG_STORAGE_KEY, JSON.stringify(config));
+/** The base URL must be a full URL; short paths like "/mistral/v1" are not. */
+export const isFullUrl = (value: string): boolean =>
+  /^https?:\/\/\S+$/i.test(value.trim());
+
+export function readLlmConfig(): LlmConfig {
+  const overrides = readOverrides();
+  // Ignore a saved URL that isn't a full URL (e.g. one saved by an older
+  // version of this demo) instead of calling a route that no longer exists.
+  const savedBaseUrl = overrides.baseUrl?.trim() ?? "";
+  return {
+    baseUrl: normalizeUrl(
+      isFullUrl(savedBaseUrl) ? savedBaseUrl : DEFAULT_LLM_CONFIG.baseUrl,
+    ),
+    apiKey: overrides.apiKey?.trim() ?? "",
+    model: overrides.model?.trim() || DEFAULT_LLM_CONFIG.model,
+  };
+}
+
+/**
+ * Saves the panel's values as overrides. Fields equal to the current default
+ * are stored empty, so they keep following `.env` instead of freezing today's
+ * value.
+ */
+export function saveLlmConfig(config: LlmConfig): void {
+  const baseUrl = normalizeUrl(config.baseUrl);
+  const model = config.model.trim();
+  const overrides: LlmConfig = {
+    baseUrl: baseUrl === DEFAULT_LLM_CONFIG.baseUrl ? "" : baseUrl,
+    apiKey: config.apiKey.trim(),
+    model: model === DEFAULT_LLM_CONFIG.model ? "" : model,
+  };
+  window.localStorage.setItem(
+    LLM_CONFIG_STORAGE_KEY,
+    JSON.stringify(overrides),
+  );
+}
+
+export function clearLlmConfig(): void {
+  window.localStorage.removeItem(LLM_CONFIG_STORAGE_KEY);
+}
+
+/**
+ * The `.env` endpoint with no panel key goes through the dev-server proxy,
+ * which adds MISTRAL_API_KEY and avoids CORS. Anything else (a different URL,
+ * or a key typed into the panel) is called directly from the browser.
+ */
+function resolveEndpoint(config: LlmConfig): string {
+  const useProxy =
+    !config.apiKey && config.baseUrl === DEFAULT_LLM_CONFIG.baseUrl;
+  return useProxy
+    ? `${LLM_PROXY_PATH}/chat/completions`
+    : `${config.baseUrl}/chat/completions`;
 }
 
 /** Mistral may return `content` as a string or as an array of text chunks. */
@@ -67,7 +132,7 @@ function deltaText(content: unknown): string {
 /**
  * Streams a chat completion. Calls `onDelta` for every text increment and
  * resolves with the full text. Throws on HTTP errors (message includes the
- * status and body) and on a missing API key.
+ * status and body).
  */
 export async function streamChatCompletion(
   messages: LlmChatMessage[],
@@ -75,16 +140,10 @@ export async function streamChatCompletion(
   signal?: AbortSignal,
 ): Promise<string> {
   const config = readLlmConfig();
-  // A relative base URL means the dev-server proxy supplies the key.
-  const viaProxy = config.baseUrl.startsWith("/");
-  if (!viaProxy && !config.apiKey) {
-    throw new Error(
-      'No LLM API key set. Add MISTRAL_API_KEY to .env (and restart), or click the "LLM" button (bottom-left) and enter a key.',
-    );
-  }
+  const endpoint = resolveEndpoint(config);
 
   const request = () =>
-    fetch(`${config.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+    fetch(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -107,17 +166,19 @@ export async function streamChatCompletion(
       Number.isFinite(retryAfter) && retryAfter > 0
         ? retryAfter * 1000
         : 1500 * attempt;
-
     await new Promise((resolve) => {
       setTimeout(resolve, delayMs);
     });
-
     response = await request();
   }
 
   if (!response.ok || !response.body) {
     const body = await response.text().catch(() => "");
-    throw new Error(`LLM request failed (${response.status}): ${body}`);
+    const hint =
+      response.status === 401 || response.status === 403
+        ? " — check MISTRAL_API_KEY in .env (restart the dev server) or the key in the LLM panel"
+        : "";
+    throw new Error(`LLM request failed (${response.status})${hint}: ${body}`);
   }
 
   const reader = response.body.getReader();
@@ -126,7 +187,6 @@ export async function streamChatCompletion(
   let full = "";
 
   // SSE: lines of `data: {json}` terminated by `data: [DONE]`.
-
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
