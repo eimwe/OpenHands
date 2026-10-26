@@ -118,15 +118,12 @@ export default defineConfig(({ mode }) => {
     // middleware below merges it into the proxied response.
   } = loadEnv(mode, process.cwd());
 
-  // Mock-mode demo only. MISTRAL_API_KEY has no `VITE_` prefix on purpose:
-  // Vite inlines only `VITE_*` variables into the browser bundle, so the key
-  // stays on the dev server and is attached to proxied requests below (see
-  // LLM_PROXY_PATH). The non-secret VITE_LLM_BASE_URL / VITE_LLM_MODEL are
-  // also read by the browser (src/mocks/llm-bridge.ts).
-  const { MISTRAL_API_KEY = "", VITE_LLM_BASE_URL = "" } = loadEnv(
+  // VITE_LLM_BASE_URL / VITE_LLM_MODEL are
+  // read by the browser (src/mocks/llm-bridge.ts).
+  const { MOCK_LLM_API_KEY = "", VITE_LLM_BASE_URL = "" } = loadEnv(
     mode,
     process.cwd(),
-    ["MISTRAL_", "VITE_LLM_"],
+    ["MOCK_LLM_", "VITE_LLM_"],
   );
   let llmBaseUrl: URL;
   try {
@@ -426,7 +423,7 @@ export default defineConfig(({ mode }) => {
         // Mock-mode LLM bridge: the browser calls /llm-proxy/chat/completions,
         // the dev server forwards it to the VITE_LLM_BASE_URL provider (full
         // URL, e.g. https://api.mistral.ai/v1) and adds the Authorization
-        // header from MISTRAL_API_KEY in .env. The key never reaches the
+        // header from MOCK_LLM_API_KEY in .env. The key never reaches the
         // browser, and there is no CORS issue.
         [LLM_PROXY_PATH]: {
           target: llmBaseUrl.origin,
@@ -434,8 +431,8 @@ export default defineConfig(({ mode }) => {
           secure: true,
           rewrite: (path: string) =>
             `${llmBasePath}${path.slice(LLM_PROXY_PATH.length)}`,
-          ...(MISTRAL_API_KEY
-            ? { headers: { Authorization: `Bearer ${MISTRAL_API_KEY}` } }
+          ...(MOCK_LLM_API_KEY
+            ? { headers: { Authorization: `Bearer ${MOCK_LLM_API_KEY}` } }
             : {}),
         },
         "/api": {

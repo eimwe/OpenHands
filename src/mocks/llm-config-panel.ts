@@ -75,7 +75,7 @@ function buildPanel(): HTMLElement {
   });
   const apiKey = createField("API key (optional)", {
     value: config.apiKey,
-    placeholder: "empty = MISTRAL_API_KEY from .env",
+    placeholder: "empty = MOCK_LLM_API_KEY from .env",
     hint: "Sent straight from this browser. Leave empty to use the key kept on the dev server.",
     type: "password",
     autocomplete: "off",

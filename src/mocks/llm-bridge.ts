@@ -9,7 +9,7 @@
  *   3. built-in fallbacks in `llm-defaults.ts`
  *
  * The API key is never taken from a `VITE_` variable: by default it stays on
- * the dev server (MISTRAL_API_KEY in `.env`) and is attached by the
+ * the dev server (MOCK_LLM_API_KEY in `.env`) and is attached by the
  * `/llm-proxy` route in vite.config.ts. A key typed into the panel is sent
  * straight from the browser instead. Demo only.
  */
@@ -103,7 +103,7 @@ export function clearLlmConfig(): void {
 
 /**
  * The `.env` endpoint with no panel key goes through the dev-server proxy,
- * which adds MISTRAL_API_KEY and avoids CORS. Anything else (a different URL,
+ * which adds MOCK_LLM_API_KEY and avoids CORS. Anything else (a different URL,
  * or a key typed into the panel) is called directly from the browser.
  */
 function resolveEndpoint(config: LlmConfig): string {
@@ -176,7 +176,7 @@ export async function streamChatCompletion(
     const body = await response.text().catch(() => "");
     const hint =
       response.status === 401 || response.status === 403
-        ? " — check MISTRAL_API_KEY in .env (restart the dev server) or the key in the LLM panel"
+        ? " — check MOCK_LLM_API_KEY in .env (restart the dev server) or the key in the LLM panel"
         : "";
     throw new Error(`LLM request failed (${response.status})${hint}: ${body}`);
   }
